@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Drawing;
 using System.Text;
-using NativeUI;
+using MenuAPI;
 using CitizenFX.Core;
 using CitizenFX.Core.UI;
 using static CitizenFX.Core.Native.API;
@@ -40,10 +40,9 @@ namespace HandlingEditor.Client
         #endregion
 
         #region GUI_FIELDS
-        private MenuPool _menuPool;
-        private UIMenu EditorMenu;
-        private UIMenu presetsMenu;
-        private UIMenu serverPresetsMenu;
+        private Menu EditorMenu;
+        private Menu PersonalPresetsMenu;
+        private Menu ServerPresetsMenu;
         #endregion
 
         #region GUI_METHODS
@@ -52,12 +51,12 @@ namespace HandlingEditor.Client
             DisableAllControlActions(1);
             AddTextEntry("ENTER_VALUE", "Enter value");
             DisplayOnscreenKeyboard(1, "ENTER_VALUE", "", defaultText, "", "", "", 128);
-            while (UpdateOnscreenKeyboard() != 1 && UpdateOnscreenKeyboard() != 2) await Delay(0);
+            while (UpdateOnscreenKeyboard() != 1 && UpdateOnscreenKeyboard() != 2) await Delay(100);
             EnableAllControlActions(1);
             return GetOnscreenKeyboardResult();
         }
 
-        private UIMenuDynamicListItem AddDynamicFloatList(UIMenu menu, FieldInfo<float> fieldInfo)
+        private MenuDynamicListItem AddDynamicFloatList(Menu menu, FieldInfo<float> fieldInfo)
         {
             string name = fieldInfo.Name;
             string description = fieldInfo.Description;
@@ -68,9 +67,9 @@ namespace HandlingEditor.Client
                 return null;
 
             float value = currentPreset.Fields[name];
-            var newitem = new UIMenuDynamicListItem(name, description, value.ToString("F3"), (sender, direction) =>
+            string FloatChangeCallback(MenuDynamicListItem item, bool left)
             {
-                if (direction == UIMenuDynamicListItem.ChangeDirection.Left)
+                if (left)
                 {
                     var newvalue = value - editingFactor;
                     if (newvalue < min)
@@ -93,31 +92,32 @@ namespace HandlingEditor.Client
                     }
                 }
                 return value.ToString("F3");
-            });
+            }
+            var newitem = new MenuDynamicListItem(name, value.ToString("F3"), FloatChangeCallback, description);
 
-            menu.AddItem(newitem);
-
+            menu.AddMenuItem(newitem);
+            
             EditorMenu.OnItemSelect += async (sender, item, index) =>
             {
                 if (item == newitem)
                 {
-                    EditorMenu.Visible = false;
-
+                    MenuController.CloseAllMenus();
+                    
                     string text = await GetOnScreenString(value.ToString());
                     float newvalue = value;
 
                     if (float.TryParse(text, out newvalue))
                     {
                         if(newvalue >= min && newvalue <= max)
+                        {
                             currentPreset.Fields[name] = newvalue;
+                            ((MenuDynamicListItem)item).CurrentItem = newvalue.ToString("F3");
+                        }
                         else
-                            CitizenFX.Core.UI.Screen.ShowNotification($"Value out of allowed limits for ~b~{name}~w~, Min:{min}, Max:{max}");
+                            Screen.ShowNotification($"Value out of allowed limits for ~b~{name}~w~, Min:{min}, Max:{max}");
                     }else
-                        CitizenFX.Core.UI.Screen.ShowNotification($"Invalid value for ~b~{name}~w~");
+                        Screen.ShowNotification($"Invalid value for ~b~{name}~w~");
 
-                    int currentSelection = EditorMenu.CurrentSelection;
-                    InitialiseMenu(); //Should just update the current item instead
-                    EditorMenu.CurrentSelection = currentSelection;
                     EditorMenu.Visible = true;
                 }
             };
@@ -125,7 +125,7 @@ namespace HandlingEditor.Client
             return newitem;
         }
 
-        private UIMenuDynamicListItem AddDynamicIntList(UIMenu menu, FieldInfo<int> fieldInfo)
+        private MenuDynamicListItem AddDynamicIntList(Menu menu, FieldInfo<int> fieldInfo)
         {
             string name = fieldInfo.Name;
             string description = fieldInfo.Description;
@@ -135,10 +135,10 @@ namespace HandlingEditor.Client
             if (!currentPreset.Fields.ContainsKey(name))
                 return null;
 
-            int value = currentPreset.Fields[name]; //TODO: Get value from current preset
-            var newitem = new UIMenuDynamicListItem(name, description, value.ToString(), (sender, direction) =>
+            int value = currentPreset.Fields[name];
+            string IntChangeCallback(MenuDynamicListItem item, bool left)
             {
-                if (direction == UIMenuDynamicListItem.ChangeDirection.Left)
+                if (left)
                 {
                     var newvalue = value - 1;
                     if (newvalue < min)
@@ -161,15 +161,16 @@ namespace HandlingEditor.Client
                     }
                 }
                 return value.ToString();
-            });
+            }
+            var newitem = new MenuDynamicListItem(name, value.ToString(), IntChangeCallback, description);
 
-            menu.AddItem(newitem);
-
+            menu.AddMenuItem(newitem);
+            
             EditorMenu.OnItemSelect += async (sender, item, index) =>
             {
                 if (item == newitem)
                 {
-                    EditorMenu.Visible = false;
+                    MenuController.CloseAllMenus();
 
                     string text = await GetOnScreenString(value.ToString());
                     int newvalue = value;
@@ -177,16 +178,16 @@ namespace HandlingEditor.Client
                     if (int.TryParse(text, out newvalue))
                     {
                         if (newvalue >= min && newvalue <= max)
+                        {
                             currentPreset.Fields[name] = newvalue;
+                            ((MenuDynamicListItem)item).CurrentItem = newvalue.ToString();
+                        }
                         else
-                            CitizenFX.Core.UI.Screen.ShowNotification($"Value out of allowed limits for ~b~{name}~w~, Min:{min}, Max:{max}");
+                            Screen.ShowNotification($"Value out of allowed limits for ~b~{name}~w~, Min:{min}, Max:{max}");
                     }
                     else
-                        CitizenFX.Core.UI.Screen.ShowNotification($"Invalid value for ~b~{name}~w~");
+                        Screen.ShowNotification($"Invalid value for ~b~{name}~w~");
 
-                    int currentSelection = EditorMenu.CurrentSelection;
-                    InitialiseMenu(); //Should just update the current item instead
-                    EditorMenu.CurrentSelection = currentSelection;
                     EditorMenu.Visible = true;
                 }
             };
@@ -194,80 +195,57 @@ namespace HandlingEditor.Client
             return newitem;
         }
 
-        private void AddDynamicVector3List(UIMenu menu, FieldInfo<Vector3> fieldInfo)
+        private void AddDynamicVector3List(Menu menu, FieldInfo<Vector3> fieldInfo)
         {
-            if (!currentPreset.Fields.ContainsKey(fieldInfo.Name))
+            string fieldName = fieldInfo.Name;
+
+            if (!currentPreset.Fields.ContainsKey(fieldName))
                 return;
 
             string fieldDescription = fieldInfo.Description;
-            string fieldNameX = $"{fieldInfo.Name}_x";
-            float valueX = currentPreset.Fields[fieldInfo.Name].X;
-            float minValueX = fieldInfo.Min.X;
-            float maxValueX = fieldInfo.Max.X;
-
-            var newitemX = new UIMenuDynamicListItem(fieldNameX, fieldDescription, valueX.ToString("F3"), (sender, direction) =>
+            Vector3 fieldMin = fieldInfo.Min;
+            Vector3 fieldMax = fieldInfo.Max;
+            // X
+            string fieldNameX = $"{fieldName}_x";
+            float valueX = currentPreset.Fields[fieldName].X;
+            float minValueX = fieldMin.X;
+            float maxValueX = fieldMax.X;
+            var newitemX = new MenuDynamicListItem(fieldNameX, valueX.ToString("F3"), (sender, left) =>
+           {
+               if (left)
+               {
+                   var newvalue = valueX - editingFactor;
+                   if (newvalue < minValueX)
+                       CitizenFX.Core.UI.Screen.ShowNotification($"Min value allowed for ~b~{fieldNameX}~w~ is {minValueX}");
+                   else
+                   {
+                       valueX = newvalue;
+                       currentPreset.Fields[fieldInfo.Name].X = newvalue;
+                   }
+               }
+               else
+               {
+                   var newvalue = valueX + editingFactor;
+                   if (newvalue > maxValueX)
+                       CitizenFX.Core.UI.Screen.ShowNotification($"Max value allowed for ~b~{fieldNameX}~w~ is {maxValueX}");
+                   else
+                   {
+                       valueX = newvalue;
+                       currentPreset.Fields[fieldInfo.Name].X = newvalue;
+                   }
+               }
+               return valueX.ToString("F3");
+           }, fieldDescription);
+            menu.AddMenuItem(newitemX);
+           
+            // Y
+            string fieldNameY = $"{fieldName}_y";
+            float valueY = currentPreset.Fields[fieldName].Y;
+            float minValueY = fieldMin.Y;
+            float maxValueY = fieldMax.Y;
+            var newitemY = new MenuDynamicListItem(fieldNameY, valueY.ToString("F3"), (sender, left) =>
             {
-                if (direction == UIMenuDynamicListItem.ChangeDirection.Left)
-                {
-                    var newvalue = valueX - editingFactor;
-                    if (newvalue < minValueX)
-                        CitizenFX.Core.UI.Screen.ShowNotification($"Min value allowed for ~b~{fieldNameX}~w~ is {minValueX}");
-                    else
-                    {
-                        valueX = newvalue;
-                        currentPreset.Fields[fieldInfo.Name].X = newvalue;
-                    }
-                }
-                else
-                {
-                    var newvalue = valueX + editingFactor;
-                    if (newvalue > maxValueX)
-                        CitizenFX.Core.UI.Screen.ShowNotification($"Max value allowed for ~b~{fieldNameX}~w~ is {maxValueX}");
-                    else
-                    {
-                        valueX = newvalue;
-                        currentPreset.Fields[fieldInfo.Name].X = newvalue;
-                    }
-                }
-                return valueX.ToString("F3");
-            });
-
-            menu.AddItem(newitemX);
-
-            EditorMenu.OnItemSelect += async (sender, item, index) =>
-            {
-                if (item == newitemX)
-                {
-                    EditorMenu.Visible = false;
-
-                    string text = await GetOnScreenString(valueX.ToString());
-                    float newvalue = valueX;
-
-                    if (float.TryParse(text, out newvalue))
-                    {
-                        if (newvalue >= minValueX && newvalue <= maxValueX)
-                            currentPreset.Fields[fieldInfo.Name].X = newvalue;
-                        else
-                            CitizenFX.Core.UI.Screen.ShowNotification($"Value out of allowed limits for ~b~{fieldNameX}~w~, Min:{minValueX}, Max:{maxValueX}");
-                    }
-                    else
-                        CitizenFX.Core.UI.Screen.ShowNotification($"Invalid value for ~b~{fieldNameX}~w~");
-
-                    int currentSelection = EditorMenu.CurrentSelection;
-                    InitialiseMenu(); //Should just update the current item instead
-                    EditorMenu.CurrentSelection = currentSelection;
-                    EditorMenu.Visible = true;
-                }
-            };
-
-            string fieldNameY = $"{fieldInfo.Name}_y";
-            float valueY = currentPreset.Fields[fieldInfo.Name].Y;
-            float minValueY = fieldInfo.Min.X;
-            float maxValueY = fieldInfo.Max.X;
-
-            var newitemY = new UIMenuDynamicListItem(fieldNameY, fieldDescription, valueY.ToString("F3"), (sender, direction) =>
-            {
-                if (direction == UIMenuDynamicListItem.ChangeDirection.Left)
+                if (left)
                 {
                     var newvalue = valueY - editingFactor;
                     if (newvalue < minValueY)
@@ -290,44 +268,17 @@ namespace HandlingEditor.Client
                     }
                 }
                 return valueY.ToString("F3");
-            });
-
-            menu.AddItem(newitemY);
-
-            EditorMenu.OnItemSelect += async (sender, item, index) =>
+            }, fieldDescription);
+            menu.AddMenuItem(newitemY);
+           
+            // Z
+            string fieldNameZ = $"{fieldName}_z";
+            float valueZ = currentPreset.Fields[fieldName].Z;
+            float minValueZ = fieldMin.Z;
+            float maxValueZ = fieldMax.Z;
+            var newitemZ = new MenuDynamicListItem(fieldNameZ, valueZ.ToString("F3"), (sender, left) =>
             {
-                if (item == newitemY)
-                {
-                    EditorMenu.Visible = false;
-
-                    string text = await GetOnScreenString(valueY.ToString());
-                    float newvalue = valueY;
-
-                    if (float.TryParse(text, out newvalue))
-                    {
-                        if (newvalue >= minValueY && newvalue <= maxValueY)
-                            currentPreset.Fields[fieldInfo.Name].Y = newvalue;
-                        else
-                            CitizenFX.Core.UI.Screen.ShowNotification($"Value out of allowed limits for ~b~{fieldNameY}~w~, Min:{minValueY}, Max:{maxValueY}");
-                    }
-                    else
-                        CitizenFX.Core.UI.Screen.ShowNotification($"Invalid value for ~b~{fieldNameY}~w~");
-
-                    int currentSelection = EditorMenu.CurrentSelection;
-                    InitialiseMenu(); //Should just update the current item instead
-                    EditorMenu.CurrentSelection = currentSelection;
-                    EditorMenu.Visible = true;
-                }
-            };
-
-            string fieldNameZ = $"{fieldInfo.Name}_z";
-            float valueZ = currentPreset.Fields[fieldInfo.Name].Z;
-            float minValueZ = fieldInfo.Min.Z;
-            float maxValueZ = fieldInfo.Max.Z;
-
-            var newitemZ = new UIMenuDynamicListItem(fieldNameZ, fieldDescription, valueZ.ToString("F3"), (sender, direction) =>
-            {
-                if (direction == UIMenuDynamicListItem.ChangeDirection.Left)
+                if (left)
                 {
                     var newvalue = valueZ - editingFactor;
                     if (newvalue < minValueZ)
@@ -350,15 +301,58 @@ namespace HandlingEditor.Client
                     }
                 }
                 return valueZ.ToString("F3");
-            });
-
-            menu.AddItem(newitemZ);
-
+            }, fieldDescription);
+            menu.AddMenuItem(newitemZ);
+            
             EditorMenu.OnItemSelect += async (sender, item, index) =>
             {
-                if (item == newitemZ)
+                if (item == newitemX)
                 {
-                    EditorMenu.Visible = false;
+                    MenuController.CloseAllMenus();
+
+                    string text = await GetOnScreenString(valueX.ToString());
+                    float newvalue = valueX;
+
+                    if (float.TryParse(text, out newvalue))
+                    {
+                        if (newvalue >= minValueX && newvalue <= maxValueX)
+                        {
+                            currentPreset.Fields[fieldInfo.Name].X = newvalue;
+                            ((MenuDynamicListItem)item).CurrentItem = newvalue.ToString("F3");
+                        }
+                        else
+                            Screen.ShowNotification($"Value out of allowed limits for ~b~{fieldNameX}~w~, Min:{minValueX}, Max:{maxValueX}");
+                    }
+                    else
+                        Screen.ShowNotification($"Invalid value for ~b~{fieldNameX}~w~");
+
+                    EditorMenu.Visible = true;
+                }
+                else if (item == newitemY)
+                {
+                    MenuController.CloseAllMenus();
+
+                    string text = await GetOnScreenString(valueY.ToString());
+                    float newvalue = valueY;
+
+                    if (float.TryParse(text, out newvalue))
+                    {
+                        if (newvalue >= minValueY && newvalue <= maxValueY)
+                        {
+                            currentPreset.Fields[fieldInfo.Name].Y = newvalue;
+                            ((MenuDynamicListItem)item).CurrentItem = newvalue.ToString("F3");
+                        }
+                        else
+                            Screen.ShowNotification($"Value out of allowed limits for ~b~{fieldNameY}~w~, Min:{minValueY}, Max:{maxValueY}");
+                    }
+                    else
+                        Screen.ShowNotification($"Invalid value for ~b~{fieldNameY}~w~");
+
+                    EditorMenu.Visible = true;
+                }
+                else if (item == newitemZ)
+                {
+                    MenuController.CloseAllMenus();
 
                     string text = await GetOnScreenString(valueZ.ToString());
                     float newvalue = valueZ;
@@ -366,26 +360,26 @@ namespace HandlingEditor.Client
                     if (float.TryParse(text, out newvalue))
                     {
                         if (newvalue >= minValueZ && newvalue <= maxValueZ)
+                        {
                             currentPreset.Fields[fieldInfo.Name].Z = newvalue;
+                            ((MenuDynamicListItem)item).CurrentItem = newvalue.ToString("F3");
+                        }
                         else
-                            CitizenFX.Core.UI.Screen.ShowNotification($"Value out of allowed limits for ~b~{fieldNameZ}~w~, Min:{minValueZ}, Max:{maxValueZ}");
+                            Screen.ShowNotification($"Value out of allowed limits for ~b~{fieldNameZ}~w~, Min:{minValueZ}, Max:{maxValueZ}");
                     }
                     else
-                        CitizenFX.Core.UI.Screen.ShowNotification($"Invalid value for ~b~{fieldNameZ}~w~");
+                        Screen.ShowNotification($"Invalid value for ~b~{fieldNameZ}~w~");
 
-                    int currentSelection = EditorMenu.CurrentSelection;
-                    InitialiseMenu(); //Should just update the current item instead
-                    EditorMenu.CurrentSelection = currentSelection;
                     EditorMenu.Visible = true;
                 }
             };
         }
         
-        private UIMenuItem AddMenuReset(UIMenu menu)
+        private MenuItem AddMenuReset(Menu menu)
         {
-            var newitem = new UIMenuItem("Reset", "Restores the default values");
-            menu.AddItem(newitem);
-
+            var newitem = new MenuItem("Reset Preset", "Restores the default values");
+            menu.AddMenuItem(newitem);
+            
             menu.OnItemSelect += (sender, item, index) =>
             {
                 if (item == newitem)
@@ -394,86 +388,85 @@ namespace HandlingEditor.Client
                     RefreshVehicleUsingPreset(currentVehicle, currentPreset);
                     RemoveDecorators(currentVehicle);
 
-                    InitialiseMenu();
+                    BuildMenu();
                     EditorMenu.Visible = true;
                 }
             };
+
             return newitem;
         }
 
-        private UIMenuItem AddLockedItem(UIMenu menu, BaseFieldInfo fieldInfo)
+        private MenuItem AddLockedItem(Menu menu, BaseFieldInfo fieldInfo)
         {
-            var newitem = new UIMenuItem(fieldInfo.Name, fieldInfo.Description);
+            var newitem = new MenuItem(fieldInfo.Name, fieldInfo.Description);
             newitem.Enabled = false;
-            newitem.SetRightBadge(UIMenuItem.BadgeStyle.Lock);
+            newitem.RightIcon = MenuItem.Icon.LOCK;
 
-            menu.AddItem(newitem);
-
+            menu.AddMenuItem(newitem);
+            
+            /**
             menu.OnItemSelect += (sender, item, index) =>
             {
                 if (item == newitem)
                 {
                     CitizenFX.Core.UI.Screen.ShowNotification($"The server doesn't allow to edit this field.");
                 }
-            };
+            };*/
+
             return newitem;
         }
 
-        private UIMenu AddPresetsSubMenu(UIMenu menu)
+        private Menu AddPresetsSubMenu(Menu menu)
         {
-            var newitem = _menuPool.AddSubMenu(menu, "Saved Presets", "The handling presets saved by you.");
-            {
-                newitem.MouseEdgeEnabled = false;
-                newitem.ControlDisablingEnabled = false;
-                newitem.MouseControlsEnabled = false;
-                newitem.AddInstructionalButton(new InstructionalButton(Control.PhoneExtraOption, "Save"));
-                newitem.AddInstructionalButton(new InstructionalButton(Control.PhoneOption, "Delete"));
-            }
+            Menu presetsMenu = new Menu(ScriptName, "Personal Presets");
+
+            MenuItem presetsMenuItem = new MenuItem("Personal Presets", "The handling presets saved by you.") { Label = "→→→" };
+            menu.AddMenuItem(presetsMenuItem);
+            MenuController.BindMenuItem(menu, presetsMenu, presetsMenuItem);
+
+            string saveString = GetLabelText("ITEM_SAVE");
+            string deleteString = GetLabelText("ITEM_DEL");
+
+            presetsMenu.InstructionalButtons.Add(Control.PhoneExtraOption, saveString);
+            presetsMenu.InstructionalButtons.Add(Control.PhoneOption, deleteString);
 
             KvpEnumerable kvpList = new KvpEnumerable(kvpPrefix);
             foreach(var key in kvpList)
             {
                 string value = GetResourceKvpString(key);
-                newitem.AddItem(new UIMenuItem(key.Remove(0, kvpPrefix.Length)));  
+                presetsMenu.AddMenuItem(new MenuItem(key.Remove(0, kvpPrefix.Length)));  
             }
-            return newitem;
+            return presetsMenu;
         }
 
-        private UIMenu AddServerPresetsSubMenu(UIMenu menu)
+        private Menu AddServerPresetsSubMenu(Menu menu)
         {
-            var newitem = _menuPool.AddSubMenu(menu, "Server Presets", "The handling presets loaded from the server.");
-            {
-                newitem.MouseEdgeEnabled = false;
-                newitem.ControlDisablingEnabled = false;
-                newitem.MouseControlsEnabled = false;
-            }
+            Menu presetsMenu = new Menu(ScriptName, "Server Presets");
+
+            MenuItem presetsMenuItem = new MenuItem("Server Presets", "The handling presets loaded from the server.") { Label = "→→→" };
+            menu.AddMenuItem(presetsMenuItem);
+            MenuController.BindMenuItem(menu, presetsMenu, presetsMenuItem);
 
             foreach (var preset in serverPresets)
-                newitem.AddItem(new UIMenuItem(preset.Key));
+                presetsMenu.AddMenuItem(new MenuItem(preset.Key));
 
-            return newitem;
+            return presetsMenu;
         }
 
-        private void InitialiseMenu()
+        private void BuildMenu()
         {
-            if (_menuPool == null)
-            {
-                _menuPool = new MenuPool();
-                {
-                    _menuPool.ResetCursorOnOpen = true;
-                }
-            }
+            MenuController.MenuAlignment = MenuController.MenuAlignmentOption.Right;
+            MenuController.MenuToggleKey = (Control)toggleMenu;
 
             if (EditorMenu == null)
             {
-                EditorMenu = new UIMenu(ScriptName, "Beta", new PointF(screenPosX * Screen.Width, screenPosY * Screen.Height));
-                {
-                    EditorMenu.MouseEdgeEnabled = false;
-                    EditorMenu.ControlDisablingEnabled = false;
-                    EditorMenu.MouseControlsEnabled = false;
-                }
+                EditorMenu = new Menu(ScriptName, "Editor") { Visible = false };
+                MenuController.AddMenu(EditorMenu);
             }
-            else EditorMenu.Clear();
+            else EditorMenu.ClearMenuItems();
+
+            PersonalPresetsMenu = AddPresetsSubMenu(EditorMenu);
+            ServerPresetsMenu = AddServerPresetsSubMenu(EditorMenu);
 
             foreach (var item in handlingInfo.FieldsInfo)
             {
@@ -495,17 +488,16 @@ namespace HandlingEditor.Client
                 }
                 else
                 {
-                    //AddLockedItem(EditorMenu, item.Value);
+                    AddLockedItem(EditorMenu, item.Value);
                 }
             }
 
             AddMenuReset(EditorMenu);
-            presetsMenu = AddPresetsSubMenu(EditorMenu);
-            serverPresetsMenu = AddServerPresetsSubMenu(EditorMenu);
-
-            presetsMenu.OnItemSelect += (sender, item, index) =>
+            
+            
+            PersonalPresetsMenu.OnItemSelect += (sender, item, index) =>
             {
-                if(sender == presetsMenu)
+                if(sender == PersonalPresetsMenu)
                 {
                     string key = $"{kvpPrefix}{item.Text}";
                     string value = GetResourceKvpString(key);
@@ -518,17 +510,17 @@ namespace HandlingEditor.Client
                         GetPresetFromXml(handling, currentPreset);
 
                         CitizenFX.Core.UI.Screen.ShowNotification($"Personal preset ~b~{item.Text}~w~ applied");
-                        InitialiseMenu();
-                        presetsMenu.Visible = true;
+                        BuildMenu();
+                        PersonalPresetsMenu.Visible = true;
                     }
                     else
                         CitizenFX.Core.UI.Screen.ShowNotification($"~r~ERROR~w~: Personal preset ~b~{item.Text}~w~ corrupted");
                 }
             };
 
-            serverPresetsMenu.OnItemSelect += (sender, item, index) =>
+            ServerPresetsMenu.OnItemSelect += (sender, item, index) =>
             {
-                if(sender == serverPresetsMenu)
+                if(sender == ServerPresetsMenu)
                 {
                     string key = item.Text;
                     if (serverPresets.ContainsKey(key))
@@ -542,16 +534,13 @@ namespace HandlingEditor.Client
                             else Debug.Write($"Missing {field} field in currentPreset");
                         }
                         CitizenFX.Core.UI.Screen.ShowNotification($"Server preset ~b~{key}~w~ applied");
-                        InitialiseMenu();
-                        serverPresetsMenu.Visible = true;
+                        BuildMenu();
+                        ServerPresetsMenu.Visible = true;
                     }
                     else
                         CitizenFX.Core.UI.Screen.ShowNotification($"~r~ERROR~w~: Server preset ~b~{key}~w~ corrupted");
                 }
             };
-
-            _menuPool.Add(EditorMenu);
-            _menuPool.RefreshIndex();
         }
         #endregion
 
@@ -668,7 +657,7 @@ namespace HandlingEditor.Client
                     {
                         currentVehicle = vehicle;
                         currentPreset = CreateHandlingPreset(currentVehicle);
-                        InitialiseMenu();
+                        BuildMenu();
                     }
                 }
                 else
@@ -692,52 +681,46 @@ namespace HandlingEditor.Client
         /// <returns></returns>
         private async Task MenuTask()
         {
-            if(_menuPool != null)
+            if(MenuController.IsAnyMenuOpen())
             {
-                _menuPool.ProcessMenus();
-
-                if (_menuPool.IsAnyMenuOpen())
-                    DisableControls();
+                DisableControls();
 
                 if (currentVehicle != -1 && currentPreset != null)
                 {
-                    if (IsControlJustPressed(1, toggleMenu)/* || IsDisabledControlJustPressed(1, toggleMenu)*/) // TOGGLE MENU VISIBLE
-                    {
-                        if (!EditorMenu.Visible && !_menuPool.IsAnyMenuOpen())
-                            EditorMenu.Visible = true;
-                        else if (_menuPool.IsAnyMenuOpen())
-                            _menuPool.CloseAllMenus();
-                    }
+                    Menu currentMenu = MenuController.GetCurrentMenu();
 
-                    if (presetsMenu.Visible)
+                    if (currentMenu == PersonalPresetsMenu)
                     {
                         DisableControlAction(1, 75, true); // INPUT_VEH_EXIT - Y
                         DisableControlAction(1, 37, true); // INPUT_SELECT_WEAPON - X
-
+                        
+                        // Save Personal Preset
                         if (IsControlJustPressed(1, 179))
                         {
                             string name = await GetOnScreenString("");
                             if (!string.IsNullOrEmpty(name))
                             {
                                 SavePreset(name, currentPreset);
-                                InitialiseMenu();
-                                presetsMenu.Visible = true;
+                                BuildMenu();
+                                PersonalPresetsMenu.Visible = true;
                                 CitizenFX.Core.UI.Screen.ShowNotification($"Personal preset ~g~{name}~w~ saved");
                             }
                             else
                                 CitizenFX.Core.UI.Screen.ShowNotification("Invalid string.");
                         }
+                        // Delete selected preset
                         else if (IsControlJustPressed(1, 178))
                         {
-                            if (presetsMenu.MenuItems.Count > 0)
+                            var items = PersonalPresetsMenu.GetMenuItems();
+                            if (items.Count > 0)
                             {
-                                string kvpName = presetsMenu.MenuItems[presetsMenu.CurrentSelection].Text;
+                                string kvpName = items[PersonalPresetsMenu.CurrentIndex].Text;
                                 string key = $"{kvpPrefix}{kvpName}";
                                 if (GetResourceKvpString(key) != null)
                                 {
                                     DeleteResourceKvp(key);
-                                    InitialiseMenu();
-                                    presetsMenu.Visible = true;
+                                    BuildMenu();
+                                    PersonalPresetsMenu.Visible = true;
 
                                     CitizenFX.Core.UI.Screen.ShowNotification($"Personal preset ~r~{kvpName}~w~ deleted");
                                 }
@@ -750,8 +733,8 @@ namespace HandlingEditor.Client
                 }
                 else
                 {
-                    if (_menuPool.IsAnyMenuOpen())
-                        _menuPool.CloseAllMenus();
+                    if (MenuController.IsAnyMenuOpen())
+                        MenuController.CloseAllMenus();
                 }
             }
         }

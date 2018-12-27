@@ -34,8 +34,8 @@
     <Reference Include="CitizenFX.Core">
       <HintPath>E:\Giochi\FiveM\citizen\clr2\lib\mono\4.5\CitizenFX.Core.dll</HintPath>
     </Reference>
-    <Reference Include="NativeUI">
-      <HintPath>thirdparty\NativeUI.dll</HintPath>
+    <Reference Include="MenuAPI.net">
+      <HintPath>E:\Carmine\neos7\cfx-server\server-data\resources\[customscripts]\MenuAPI\MenuAPI.net.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
